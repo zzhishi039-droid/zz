@@ -180,7 +180,7 @@
 
             <div id="comments-list" class="comments-list">
                 <!-- JavaScriptでここにコメントが追加されます -->
-                <p style="color: var(--text-muted);">読み込み中...</p>
+                <p style="color: var(--text-muted);" id="empty-message">まだレビューはありません。最初のレビューを投稿してみましょう！</p>
             </div>
         </section>
     </main>
@@ -199,21 +199,60 @@
         const submitBtn = document.getElementById('submit-btn');
         const commentsListContainer = document.getElementById('comments-list');
 
-        // Configが空（プレースホルダーのまま）かどうかを判定
+        // 日付をフォーマットする関数
+        function formatDate(date) {
+            return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        }
+
+        // 単一のコメントをDOMに追加する関数 (XSS対策のため textContent を使用)
+        function createCommentElement(name, text, dateString) {
+            const cardEl = document.createElement('div');
+            cardEl.className = 'comment-card';
+
+            const nameEl = document.createElement('h4');
+            nameEl.textContent = name ? name : '匿名ユーザー';
+
+            const textEl = document.createElement('p');
+            textEl.textContent = text;
+
+            const dateEl = document.createElement('small');
+            dateEl.textContent = dateString;
+
+            cardEl.appendChild(nameEl);
+            cardEl.appendChild(textEl);
+            cardEl.appendChild(dateEl);
+            
+            return cardEl;
+        }
+
+        // --- Configが空の場合（ダミー動作モード） ---
         if (Object.keys(firebaseConfig).length === 0) {
             
-            // Configがない場合はFirebaseを初期化せず、UIだけ整える
-            commentsListContainer.innerHTML = '<p style="color: var(--accent-color);">※Firebase configが設定されていないため、現在プレビューモードです。</p>';
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Config未設定';
-
             form.addEventListener('submit', (e) => {
                 e.preventDefault();
+                
+                const nameValue = document.getElementById('author-name').value.trim();
+                const textValue = document.getElementById('comment-text').value.trim();
+
+                if (!textValue) return;
+
+                // 「まだレビューはありません」のメッセージを消去
+                const emptyMsg = document.getElementById('empty-message');
+                if (emptyMsg) emptyMsg.remove();
+
+                // 画面上（DOM）にだけコメントを追加
+                const dateString = formatDate(new Date());
+                const commentEl = createCommentElement(nameValue, textValue, dateString);
+                
+                // 新しいコメントを一番上に追加
+                commentsListContainer.prepend(commentEl);
+                
+                form.reset();
             });
 
+        // --- Configが設定されている場合（Firebase通信モード） ---
         } else {
             
-            // Configがある場合のみFirebaseを初期化
             const app = initializeApp(firebaseConfig);
             const db = getFirestore(app);
 
@@ -226,44 +265,25 @@
                     commentsListContainer.innerHTML = ''; 
 
                     if (querySnapshot.empty) {
-                        commentsListContainer.innerHTML = '<p style="color: var(--text-muted);">まだレビューはありません。最初のレビューを投稿してみましょう！</p>';
+                        commentsListContainer.innerHTML = '<p style="color: var(--text-muted);" id="empty-message">まだレビューはありません。最初のレビューを投稿してみましょう！</p>';
                         return;
                     }
 
                     querySnapshot.forEach((doc) => {
                         const data = doc.data();
-                        displayComment(data.name, data.text, data.createdAt);
+                        
+                        let dateString = "たった今";
+                        if (data.createdAt && data.createdAt.toDate) {
+                            dateString = formatDate(data.createdAt.toDate());
+                        }
+
+                        const commentEl = createCommentElement(data.name, data.text, dateString);
+                        commentsListContainer.appendChild(commentEl);
                     });
                 } catch (error) {
                     console.error("コメントの読み込みエラー:", error);
                     commentsListContainer.innerHTML = '<p style="color: #ff6b6b;">コメントの読み込みに失敗しました。</p>';
                 }
-            }
-
-            // 単一のコメントをDOMに追加する関数 (XSS対策のため textContent を使用)
-            function displayComment(name, text, createdAt) {
-                const cardEl = document.createElement('div');
-                cardEl.className = 'comment-card';
-
-                const nameEl = document.createElement('h4');
-                nameEl.textContent = name ? name : '匿名ユーザー';
-
-                const textEl = document.createElement('p');
-                textEl.textContent = text;
-
-                const dateEl = document.createElement('small');
-                if (createdAt && createdAt.toDate) {
-                    const date = createdAt.toDate();
-                    dateEl.textContent = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-                } else {
-                    dateEl.textContent = "たった今";
-                }
-
-                cardEl.appendChild(nameEl);
-                cardEl.appendChild(textEl);
-                cardEl.appendChild(dateEl);
-                
-                commentsListContainer.appendChild(cardEl);
             }
 
             // フォーム送信時の処理
